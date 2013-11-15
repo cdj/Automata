@@ -1,109 +1,144 @@
-#include <Servo.h>
+#include <Stepper.h>
 
-// Globals
-Servo leftServo;  // create servo object to control a servo
-Servo rightServo;  // create servo object to control a servo
+#define STEPS 64 // 2048 4096 4076 48 64 ? http://forum.arduino.cc/index.php?topic=71964.15
+
+const int pinLeftEye = 12;
+const int pinRightEye = 11;
+
+//const int pinTalk = 8;
+const int pinHead = 3;
+const int pinWink = 4;
+
+Stepper stepper(STEPS, 7, 8, 9, 10);
 unsigned long blinkNext = 0;
-unsigned long unblinkNext = 0;
-unsigned long unblinkTime = 0;
-int buttonState = 0;
-boolean opening = false;
-boolean closing = false;
-
-// Settings
 const int blinkIntervalMax = 6000;
 const int blinkIntervalMin = 1000;
-const int blinkDuration = 200;
-//const int eyeOpenPos = 90;
-//const int eyeClosedPos = 180;
+const int winkIntervalMin = 2000;
+const int blinkWait = 100;
+bool needsOpening = false;
+unsigned long openTime = 0;
+unsigned long lastWink = 0;
+//unsigned long lastPlay = 0;
+unsigned long endPauseTime = 0;
+int stepsFromNeutral = 0;
+int targetStepsFromNeutral = 0;
+const int maxStepsFromNeutral = 1019; // 90 degrees
+const int headTurnMaxSteps = 800;
+const int headTurnMinSteps = 200;
+const int headTurnInterval = 8;
+const int headPauseMax = 4000;
+const int headPauseMin = 1000;
 
-// Pins
-const int leftServoPin = 2;
-const int rightServoPin = 4;
-const int buttonPin = 7;
 
-
-void setup() 
-{ 
-  leftServo.attach(leftServoPin);  // attaches the servo on pin 2 to the servo object
-  rightServo.attach(rightServoPin);  // attaches the servo on pin 2 to the servo object
-  pinMode(buttonPin, INPUT); 
+void setup() {
   Serial.begin(9600);
-} 
+  pinMode(pinLeftEye, OUTPUT);
+  pinMode(pinRightEye, OUTPUT);
+  stepper.setSpeed(100);
 
-void loop() 
-{
-  buttonState = LOW;//digitalRead(buttonPin);
-  // check for wink press
-  if(buttonState == HIGH)
-  {
-    Serial.println("Button Pressed");
-    // make sure eyes are open
-    if(unblinkNext > blinkNext)
-    {
-      // eyes still need to be triggered to close
-      leftServo.write(65);
-      rightServo.write(145);
-      delay(blinkDuration);
+  //pinMode(pinTalk, INPUT);
+  //digitalWrite(pinTalk, HIGH);
+  pinMode(pinHead, INPUT);
+  digitalWrite(pinHead, HIGH);
+  pinMode(pinWink, INPUT);
+  digitalWrite(pinWink, HIGH);
+}
+
+void loop() {
+  if(needsOpening) {
+    if(millis() >= openTime) {
+      openEyes();
     }
-    else if(millis() < unblinkTime)
-    {
-      delay(unblinkTime);
-    }
-    unblinkNext = 0;
-    unblinkTime = 0;
-    
-    // trigger one eye
-    Serial.println("Winking");
-    leftServo.write(30);
-    delay(blinkDuration);
-    while(buttonState == HIGH)
-    {
-      // wait until button is no longer pressed
-      buttonState = digitalRead(buttonPin);
-      delay(15);
-    }
-    Serial.println("Un-winking");
-    //open eye
-    leftServo.write(65);
-    delay(blinkDuration);
-    //set timers
-    unblinkTime = millis();
-    blinkNext = unblinkTime + random(blinkIntervalMin, blinkIntervalMax);
-    Serial.println("Done winking");
-    
-  }
-  else
-  {
-    if(millis() > blinkNext)
-    {
-      if((unblinkNext != 0) && (millis() > unblinkNext) && !opening)
-      {
-        Serial.println("Un-blinking");
-        // unblink eyes
-        leftServo.write(66);
-        rightServo.write(135);
-        // set timers
-        unblinkTime = millis() + blinkDuration;
-        blinkNext = unblinkTime + random(blinkIntervalMin, blinkIntervalMax);
-        unblinkNext = 0;
-        closing = false;
-        opening = true;
-      }
-      else if(!closing)
-      {
-        Serial.println("Blinking");
-        // blink eyes
-        leftServo.write(30);
-        rightServo.write(180);
-        // set timers
-        unblinkNext = millis() + blinkDuration;
-        closing = true;
-        opening = false;
-      }
+  } else {
+    // blink if not wink
+    if((digitalRead(pinWink) == HIGH) && (millis() > (lastWink + winkIntervalMin))) {
+      winkEye(pinLeftEye);
+    } else if(millis() >= blinkNext) { // time to blink eyes?
+      blinkEyes();
     }
   }
-  //Servo::refresh();
+  
+//  // play if pressed
+//  if((digitalRead(pinTalk) == HIGH) && (millis() > (lastPlay + 2000))) {
+//    //play next
+//    // TODO
+//    lastPlay = millis();
+//  }
+  
+  // check for manual turn head
+  if(digitalRead(pinHead) == HIGH) {
+    Serial.println("Head button pressed");
+    // turn to neutral
+    targetStepsFromNeutral = 0;
+    if(stepsFromNeutral == 0) {
+      endPauseTime = millis() + headPauseMax; // extend pause while button is pressed
+    }
+  }
+  
+  if((millis() > endPauseTime) && (stepsFromNeutral != targetStepsFromNeutral)) {
+    // moving head
+    int stepsToMove = headTurnInterval;
+    int diff = stepsFromNeutral - targetStepsFromNeutral;
+    
+    if(diff < 0) stepsToMove *= -1; // moving in other direction
+    
+    if(abs(diff) < headTurnInterval) {
+      // at the end of a head turn, about ready to pause
+      stepsToMove = diff;
+    }
+    
+    // move head towards goal
+    //Serial.print("Moving head: ");
+    //Serial.println(stepsToMove);
+    stepper.step(stepsToMove);
+    stepsFromNeutral -= stepsToMove;
+    
+    if(stepsFromNeutral == targetStepsFromNeutral) {
+      // start head pause
+      endPauseTime = millis() + (targetStepsFromNeutral == 0) ? headPauseMax : random(headPauseMin, headPauseMax);
+    }
+  } else {
+    // determine next head position
+    int shifted = stepsFromNeutral + random(headTurnMinSteps, headTurnMaxSteps);
+    if(shifted > maxStepsFromNeutral) {
+      targetStepsFromNeutral = shifted - maxStepsFromNeutral;
+    } else {
+      targetStepsFromNeutral = shifted;
+    }
+    //Serial.println("New head destination: " + targetStepsFromNeutral);
+    //Serial.print("New head dest is ");
+    //Serial.println(targetStepsFromNeutral);
+  }
 }
 
 
+//////////////////////
+// Helper Functions //
+//////////////////////
+
+void blinkEyes() {
+  Serial.println("Blinking");
+  digitalWrite(pinLeftEye, HIGH);
+  digitalWrite(pinRightEye, HIGH);
+  
+  openTime = millis() + blinkWait;
+  needsOpening = true;
+  blinkNext = millis() + random(blinkIntervalMin, blinkIntervalMax);
+}
+
+void winkEye(int toWink) {
+  Serial.println("Winking");
+  digitalWrite(toWink, HIGH);
+  
+  openTime = millis() + blinkWait * 2; // hold the wink a little longer
+  needsOpening = true;
+  blinkNext = millis() + random(blinkIntervalMin, blinkIntervalMax); // won't need to blink again right away
+  lastWink = millis();
+}
+
+void openEyes() {
+  Serial.println("Opening eyes");
+  digitalWrite(pinLeftEye, LOW);
+  digitalWrite(pinRightEye, LOW);
+  needsOpening = false;
+}
