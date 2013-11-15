@@ -4,8 +4,6 @@
 
 const int pinLeftEye = 12;
 const int pinRightEye = 11;
-
-//const int pinTalk = 8;
 const int pinHead = 3;
 const int pinWink = 4;
 
@@ -18,7 +16,6 @@ const int blinkWait = 100;
 bool needsOpening = false;
 unsigned long openTime = 0;
 unsigned long lastWink = 0;
-//unsigned long lastPlay = 0;
 unsigned long endPauseTime = 0;
 int stepsFromNeutral = 0;
 int targetStepsFromNeutral = 0;
@@ -35,9 +32,6 @@ void setup() {
   pinMode(pinLeftEye, OUTPUT);
   pinMode(pinRightEye, OUTPUT);
   stepper.setSpeed(100);
-
-  //pinMode(pinTalk, INPUT);
-  //digitalWrite(pinTalk, HIGH);
   pinMode(pinHead, INPUT);
   digitalWrite(pinHead, HIGH);
   pinMode(pinWink, INPUT);
@@ -57,13 +51,6 @@ void loop() {
       blinkEyes();
     }
   }
-  
-//  // play if pressed
-//  if((digitalRead(pinTalk) == HIGH) && (millis() > (lastPlay + 2000))) {
-//    //play next
-//    // TODO
-//    lastPlay = millis();
-//  }
   
   // check for manual turn head
   if(digitalRead(pinHead) == HIGH) {
@@ -88,8 +75,6 @@ void loop() {
     }
     
     // move head towards goal
-    //Serial.print("Moving head: ");
-    //Serial.println(stepsToMove);
     stepper.step(stepsToMove);
     stepsFromNeutral -= stepsToMove;
     
@@ -105,9 +90,6 @@ void loop() {
     } else {
       targetStepsFromNeutral = shifted;
     }
-    //Serial.println("New head destination: " + targetStepsFromNeutral);
-    //Serial.print("New head dest is ");
-    //Serial.println(targetStepsFromNeutral);
   }
 }
 
